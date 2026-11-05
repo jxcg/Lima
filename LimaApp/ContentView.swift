@@ -1,6 +1,7 @@
 import SwiftUI
 
-// The first screen. Phase 1 replaces this with the test bench.
+// The placeholder first screen. Phase 1 replaces it with the test bench (#1).
+// `body` describes what the screen shows. SwiftUI redraws it when its data changes.
 struct ContentView: View {
     var body: some View {
         VStack(spacing: 8) {
@@ -13,6 +14,7 @@ struct ContentView: View {
     }
 }
 
+// Shows this screen in Xcode's preview canvas. It doesn't ship in the app.
 #Preview {
     ContentView()
 }
