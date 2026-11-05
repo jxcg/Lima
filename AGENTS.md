@@ -21,12 +21,18 @@ Assume the developer is new to Swift and SwiftUI and is learning by building Lim
 - Check exact API names against the installed SDK and Apple's docs before writing code.
 - Ask before large changes across many files.
 - Suggest a commit after each working step, and quiz the developer at the end of each phase.
+- Share screenshots often while building and testing: each new screen, each Simulator pose you check, and any error you hit. Embed them in your reply so the developer can see the app take shape.
 
 ## Commits
 
 - Use Conventional Commits, such as `feat: ...` or `fix(keyboard): ...`.
 - Write the body as 3-5 short bullets in plain language.
 - Reference the issue, such as `Refs #3`. If there's no issue, ask before committing.
+
+## Branches and pull requests
+
+- Never commit or push to `main`. Work on a branch named `ft/ref-<issue number>`, such as `ft/ref-6`. If there's no issue, ask before creating the branch.
+- Push the branch and open a pull request. Wait for approval, and never merge until it's approved.
 
 ## Platform facts
 
