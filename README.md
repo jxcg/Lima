@@ -2,7 +2,7 @@
 
 An iOS keyboard that tidies up dictation.
 
-**Status:** early development. The keyboard isn't built yet. This README describes the plan. See the [issues](https://github.com/jxcg/Lima/issues) for progress.
+**Status:** early development. The keyboard isn't built yet. This README describes the plan. See the [issues](../../issues) for progress.
 
 Dictate with Apple's mic, tap **Tidy**, and Lima rewrites what you said as the message you meant to send. Tap **Undo** to get the original back. Tidy uses Apple's on-device model, so Lima doesn't send your text anywhere.
 
