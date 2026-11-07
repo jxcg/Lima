@@ -48,35 +48,35 @@ struct AvailableRegionCheck {
 
         let open = AvailableRegion.welcome(in: inner, excluding: [], divisions: [],
                                            preferRightHandPane: true, minimumPaneWidth: 250)
-        precondition(open.usesRightHandPane && open.frame == CGRect(x: 300, y: 0, width: 300, height: 500))
+        precondition(open == CGRect(x: 300, y: 0, width: 300, height: 500))
         let closed = AvailableRegion.welcome(in: outer, excluding: [], divisions: [],
                                              preferRightHandPane: false, minimumPaneWidth: 250)
-        precondition(!closed.usesRightHandPane && closed.frame == outer)
+        precondition(closed == outer)
         let narrow = AvailableRegion.welcome(in: outer, excluding: [], divisions: [],
                                              preferRightHandPane: true, minimumPaneWidth: 250)
-        precondition(!narrow.usesRightHandPane && narrow.frame == outer)
+        precondition(narrow == outer)
         let book = AvailableRegion.welcome(in: inner, excluding: [bookFold], divisions: [bookFold],
                                            preferRightHandPane: true, minimumPaneWidth: 250)
-        precondition(book.usesRightHandPane && book.frame.minX == bookFold.maxX)
+        precondition(book.minX == bookFold.maxX)
         let horizontal = AvailableRegion.welcome(in: inner, excluding: [tableFold], divisions: [tableFold],
                                                  preferRightHandPane: true, minimumPaneWidth: 250)
-        precondition(horizontal.usesRightHandPane && horizontal.frame == CGRect(x: 300, y: 260, width: 300, height: 240))
+        precondition(horizontal == CGRect(x: 300, y: 260, width: 300, height: 240))
         let inactiveFold = CGRect(x: 330, y: 0, width: 10, height: 500)
         let flat = AvailableRegion.welcome(in: inner, excluding: [], divisions: [inactiveFold],
                                            preferRightHandPane: true, minimumPaneWidth: 250)
-        precondition(flat.usesRightHandPane && flat.frame.minX == inactiveFold.maxX)
+        precondition(flat.minX == inactiveFold.maxX)
         let largeType = AvailableRegion.welcome(in: inner, excluding: [], divisions: [],
                                                 preferRightHandPane: true, minimumPaneWidth: 400)
-        precondition(!largeType.usesRightHandPane && largeType.frame == inner)
+        precondition(largeType == inner)
         let rightBlocked = CGRect(x: 300, y: 0, width: 300, height: 500)
         let blocked = AvailableRegion.welcome(in: inner, excluding: [rightBlocked], divisions: [],
                                               preferRightHandPane: true, minimumPaneWidth: 250)
-        precondition(!blocked.usesRightHandPane && blocked.frame.maxX <= rightBlocked.minX)
+        precondition(blocked.maxX <= rightBlocked.minX)
         let rightCamera = CGRect(x: 540, y: 0, width: 60, height: 60)
         let occluded = AvailableRegion.welcome(in: inner, excluding: [rightCamera], divisions: [],
                                                preferRightHandPane: true, minimumPaneWidth: 250)
-        precondition(occluded.usesRightHandPane && occluded.frame.minX >= inner.midX
-                     && occluded.frame.intersection(rightCamera).isEmpty)
+        precondition(occluded.minX >= inner.midX
+                     && occluded.intersection(rightCamera).isEmpty)
         print("PASS: right-hand wide placement, compact/narrow fallback, active/inactive folds, cameras and text-size constraints")
     }
 }

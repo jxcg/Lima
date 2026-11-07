@@ -28,8 +28,8 @@ kernel void probe(device float4 *output [[buffer(0)]], device const float *recor
     float2 position = float2(i % 160, (i / 160) % 80) + 0.5;
     half4 background = position.x < 80 ? half4(1) : half4(0, 0, 0, 1);
     output[i] = float4(limaRipple(position + (cropped ? float2(0) : translation), layer, size,
-                                 cropped ? translation : float2(0), 11.2, records + scenario * 8,
-                                 scenario % 12 == 11 ? 0 : 8, background));
+                                 cropped ? translation : float2(0), 11.2, records + scenario * 10,
+                                 scenario % 12 == 11 ? 0 : 10, background));
 }
 """).write(to: temporary.appendingPathComponent("probe.metal"), atomically: true, encoding: .utf8)
 for arguments in [
@@ -95,7 +95,10 @@ let rightScenarios = narrowScenarios.map { record in
     return translated
 }
 let scenarios = narrowScenarios + wideScenarios + wideScenarios + rightScenarios
-let records = scenarios.flatMap { $0 }
+// Keep the original circular cases, adding the new aspect field to each tap record.
+let records: [Float] = scenarios.flatMap { scenario in
+    [0, 4].flatMap { Array(scenario[$0..<($0 + 4)]) + [1] }
+}
 let recordBuffer = records.withUnsafeBytes { device.makeBuffer(bytes: $0.baseAddress!, length: $0.count)! }
 let count = scenarios.count * 160 * 80
 let buffer = device.makeBuffer(length: count * MemoryLayout<SIMD4<Float>>.stride)!
@@ -200,3 +203,35 @@ for scenario in narrowScenarios.indices {
                  "Moving content to the right-hand pane must preserve refraction and tap mapping")
 }
 print("PASS: right-hand pane refraction and tap coordinates match the centred layout")
+
+var variedRecords = records
+for scenario in scenarios.indices {
+    variedRecords[scenario * 10 + 4] = scenario.isMultiple(of: 2) ? 0.975 : 1.025
+    variedRecords[scenario * 10 + 9] = scenario.isMultiple(of: 2) ? 1.025 : 0.975
+}
+let variedInput = variedRecords.withUnsafeBytes { device.makeBuffer(bytes: $0.baseAddress!, length: $0.count)! }
+let variedBuffer = device.makeBuffer(length: count * MemoryLayout<SIMD4<Float>>.stride)!
+let variedCommand = device.makeCommandQueue()!.makeCommandBuffer()!
+let variedEncoder = variedCommand.makeComputeCommandEncoder()!
+variedEncoder.setComputePipelineState(pipeline)
+variedEncoder.setBuffer(variedBuffer, offset: 0, index: 0)
+variedEncoder.setBuffer(variedInput, offset: 0, index: 1)
+variedEncoder.setTexture(texture, index: 0)
+variedEncoder.dispatchThreads(MTLSize(width: count, height: 1, depth: 1), threadsPerThreadgroup: MTLSize(width: 64, height: 1, depth: 1))
+variedEncoder.endEncoding()
+variedCommand.commit()
+variedCommand.waitUntilCompleted()
+precondition(variedCommand.status == .completed)
+let variedOutput = variedBuffer.contents().bindMemory(to: SIMD4<Float>.self, capacity: count)
+var variedPixels = 0
+for i in 0..<count {
+    let pixel = variedOutput[i]
+    precondition((0..<4).allSatisfy { pixel[$0].isFinite && (0...1).contains(pixel[$0]) })
+    precondition((0..<3).allSatisfy { pixel[$0] <= pixel.w + 0.001 })
+    let changed = (0..<4).contains { abs(pixel[$0] - output[i][$0]) > 0.001 }
+    if [0, 3, 11].contains((i / 12800) % 12) {
+        precondition(!changed, "Aspect variation must preserve exact static endpoints")
+    } else if changed { variedPixels += 1 }
+}
+precondition(variedPixels > 100, "Small aspect variation must change the refraction footprint")
+print("PASS: subtle aspect variation changes \(variedPixels) samples without altering resting pixels or colour validity")

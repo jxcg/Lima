@@ -6,13 +6,14 @@ using namespace metal;
                                   float2 layerOrigin, float waveWidth,
                                   device const float *ripples, int count, half4 background) {
     float2 bend = float2(0);
-    // Each record contains the tap's normalised x/y, progress and size multiplier.
-    for (int i = 0; i + 3 < count; i += 4) {
+    // Each record contains normalised x/y, progress, size and a subtle aspect ratio.
+    for (int i = 0; i + 4 < count; i += 5) {
         float progress = ripples[i + 2];
         if (progress <= 0 || progress >= 1) continue;
         float scale = max(ripples[i + 3], 0.01);
         float2 offset = position + layerOrigin - size * float2(ripples[i], ripples[i + 1]);
-        float radius = length(offset);
+        float aspect = max(ripples[i + 4], 0.01);
+        float radius = length(offset * float2(aspect, 1.0 / aspect));
         // A wider window must not widen or accelerate the wave around the same text.
         float wave = radius - progress * waveWidth * 16.0;
         float width = max(waveWidth * scale, 1.0);
@@ -24,7 +25,7 @@ using namespace metal;
         float strength = sin(progress * M_PI_F);
         float displacement = 9.0 * sin(phase * 3.0)
             * envelope * strength;
-        bend += offset / max(radius, 1.0) * displacement;
+        bend += offset / max(length(offset), 1.0) * displacement;
     }
     // Overlapping waves must stay inside SwiftUI's 12-point sampling allowance.
     bend *= min(1.0, 9.0 / max(length(bend), 0.001));

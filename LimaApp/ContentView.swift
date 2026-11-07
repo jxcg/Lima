@@ -10,7 +10,8 @@ struct ContentView: View {
     @State private var lowPowerMode = ProcessInfo.processInfo.isLowPowerModeEnabled
     @State private var settled = false
     @State private var ripples: [Ripple] = []
-    @State private var pendingOpeningReveal = false
+    @State private var hingeMotion = HingeLetterMotion()
+    @State private var hingeSettleTask: Task<Void, Never>?
     @ScaledMetric(relativeTo: .largeTitle) private var dotSize = 6
     // Follow the lettering's Dynamic Type scale, rather than the window dimensions.
     @ScaledMetric(relativeTo: .largeTitle) private var rippleWidth = 54.0
@@ -22,21 +23,23 @@ struct ContentView: View {
             let reserved = reservedFrames(in: geometry)
             let divisions = geometry.reservedRegions(kind: .division, options: .includeInactive,
                                                       layoutDirectionBehavior: .fixed).map(reservedFrame)
-            let placement = AvailableRegion.welcome(
+            let available = AvailableRegion.welcome(
                 in: CGRect(origin: .zero, size: geometry.size), excluding: reserved,
                 divisions: divisions, preferRightHandPane: horizontalSizeClass == .regular,
                 minimumPaneWidth: rippleWidth * 5
             )
-            let available = placement.frame
-            TimelineView(.animation(paused: ripples.isEmpty || motionDisabled || scenePhase != .active)) { timeline in
+            TimelineView(.animation(paused: (ripples.isEmpty && !hingeMotion.isReturning)
+                                    || motionDisabled || scenePhase != .active)) { timeline in
                 let values = rippleValues(at: timeline.date)
                 let enabled = !ripples.isEmpty && !motionDisabled && scenePhase == .active
+                let hingeAmount = motionDisabled ? 0
+                    : hingeMotion.displayedAmount(at: ProcessInfo.processInfo.systemUptime)
                 let canvasSize = geometry.size
                 let waveWidth = rippleWidth
                 let background = Color(uiColor: .systemBackground)
                 ScrollView {
                     VStack(spacing: 16) {
-                        wordmark
+                        wordmark(hingeAmount: hingeAmount)
                             .accessibilityHint(motionDisabled ? "" : "Plays a brief ripple.")
                             .accessibilityAction {
                                 addRipple(
@@ -45,6 +48,8 @@ struct ContentView: View {
                                 )
                             }
                         Text("Dictation clean-up keyboard")
+                            .textRenderer(HingeLetterRenderer(amount: hingeAmount,
+                                                              maximumDisplacement: rippleWidth * 0.1, seed: 4))
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
                             .fixedSize(horizontal: false, vertical: true)
@@ -78,7 +83,7 @@ struct ContentView: View {
                     ZStack {
                         ForEach(ripples) { ripple in
                             let elapsed = timeline.date.timeIntervalSince(ripple.started)
-                            if enabled && ripple.showsShockwave && elapsed >= 0 && elapsed < RippleShockwave.lifetime {
+                            if enabled && elapsed >= 0 && elapsed < RippleShockwave.lifetime {
                                 RippleShockwave(elapsed: elapsed, rippleDuration: ripple.duration,
                                                 waveWidth: waveWidth)
                                     .position(x: ripple.origin.x * canvasSize.width,
@@ -90,18 +95,40 @@ struct ContentView: View {
                     .accessibilityHidden(true)
                 }
             }
-            .onChange(of: placement.usesRightHandPane, initial: true) { _, usesRightHandPane in
-                pendingOpeningReveal = usesRightHandPane
-                revealOpeningIfNeeded(in: geometry.size, pane: available)
-            }
-            .onChange(of: scenePhase) { _, phase in
-                if phase == .active { revealOpeningIfNeeded(in: geometry.size, pane: available) }
+            .onChange(of: geometry.size) {
+                if hingeMotion.isHandingOff { holdHingeHandoff() }
             }
         }
         .coordinateSpace(.named(RippleSpace.canvas))
+        .onHingeChange(isEnabled: !motionDisabled && scenePhase == .active) { _, context in
+            guard !motionDisabled, scenePhase == .active else { return }
+            guard let hinge = context.hinge else {
+                returnHingeLetters()
+                return
+            }
+            if hinge.status == .closed {
+                if !hingeMotion.isHandingOff {
+                    holdHingeHandoff(resume: false)
+                    scheduleHingeHandoffFallback()
+                }
+                return
+            }
+            guard hinge.status == .partiallyOpen else { returnHingeLetters(); return }
+            guard hingeMotion.update(angle: hinge.angle.radians,
+                                     at: ProcessInfo.processInfo.systemUptime) else { return }
+            hingeSettleTask?.cancel()
+            hingeSettleTask = Task {
+                do { try await Task.sleep(for: HingeLetterMotion.settleDelay) }
+                catch { return }
+                guard !Task.isCancelled else { return }
+                // A new sample cancels this task; only the final quiet interval starts the return.
+                returnHingeLetters()
+            }
+        }
         .onChange(of: scenePhase, initial: true) {
             if scenePhase == .active {
                 lowPowerMode = ProcessInfo.processInfo.isLowPowerModeEnabled
+                resumeHingeHandoff()
                 if !settled {
                     withAnimation(motionDisabled ? nil : .easeOut(duration: 0.55)) {
                         settled = true
@@ -114,11 +141,18 @@ struct ContentView: View {
             lowPowerMode = ProcessInfo.processInfo.isLowPowerModeEnabled
         }
         .onChange(of: motionDisabled) {
-            if motionDisabled { ripples.removeAll() }
+            if motionDisabled {
+                ripples.removeAll()
+                stopHingeMotion()
+            }
         }
         .onChange(of: scenePhase) {
+            if scenePhase != .active { holdHingeHandoff(resume: false) }
             if scenePhase == .background { ripples.removeAll() }
         }
+        .onChange(of: horizontalSizeClass) { holdHingeHandoff() }
+        .onAppear { resumeHingeHandoff() }
+        .onDisappear { holdHingeHandoff(resume: false) }
         .transaction { transaction in
             if motionDisabled || scenePhase != .active {
                 transaction.disablesAnimations = true
@@ -128,6 +162,63 @@ struct ContentView: View {
 
     private nonisolated enum RippleSpace: Hashable, Sendable {
         case canvas
+    }
+
+    private func stopHingeMotion() {
+        hingeSettleTask?.cancel()
+        hingeSettleTask = nil
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) { hingeMotion.reset() }
+    }
+
+    private func returnHingeLetters() {
+        guard !motionDisabled, scenePhase == .active else { stopHingeMotion(); return }
+        guard !hingeMotion.isReturning, !hingeMotion.isHandingOff else { return }
+        hingeSettleTask?.cancel()
+        hingeMotion.beginReturn(at: ProcessInfo.processInfo.systemUptime)
+        scheduleHingeReturnCompletion()
+    }
+
+    private func holdHingeHandoff(resume: Bool = true) {
+        guard !motionDisabled else { stopHingeMotion(); return }
+        hingeSettleTask?.cancel()
+        hingeSettleTask = nil
+        hingeMotion.holdForDisplayChange(at: ProcessInfo.processInfo.systemUptime)
+        if resume { resumeHingeHandoff() }
+    }
+
+    private func resumeHingeHandoff() {
+        guard !motionDisabled, scenePhase == .active, hingeMotion.isHandingOff else { return }
+        hingeSettleTask?.cancel()
+        hingeMotion.resumeAfterDisplayChange(at: ProcessInfo.processInfo.systemUptime)
+        scheduleHingeReturnCompletion()
+    }
+
+    private func scheduleHingeHandoffFallback() {
+        guard scenePhase == .active, hingeMotion.isHandingOff else { return }
+        let delay = hingeMotion.handoffFallbackDelay(at: ProcessInfo.processInfo.systemUptime)
+        // With no destination signal, discard stale state; never animate unseen during the switch.
+        hingeSettleTask = Task {
+            do { try await Task.sleep(for: .seconds(delay)) }
+            catch { return }
+            guard !Task.isCancelled else { return }
+            hingeMotion.settle()
+            hingeSettleTask = nil
+        }
+    }
+
+    private func scheduleHingeReturnCompletion() {
+        guard hingeMotion.isReturning else { hingeSettleTask = nil; return }
+        let remaining = hingeMotion.returnRemaining(at: ProcessInfo.processInfo.systemUptime)
+        // The existing timeline draws the short return, then pauses again when idle.
+        hingeSettleTask = Task {
+            do { try await Task.sleep(for: .seconds(remaining)) }
+            catch { return }
+            guard !Task.isCancelled else { return }
+            hingeMotion.settle()
+            hingeSettleTask = nil
+        }
     }
 
     private func reservedFrames(in geometry: GeometryProxy) -> [CGRect] {
@@ -148,35 +239,24 @@ struct ContentView: View {
         )
     }
 
-    private func revealOpeningIfNeeded(in size: CGSize, pane: CGRect) {
-        guard pendingOpeningReveal else { return }
-        if motionDisabled {
-            pendingOpeningReveal = false
-            return
-        }
-        guard scenePhase == .active, !pane.isEmpty else { return }
-        pendingOpeningReveal = false
-        addRipple(at: CGPoint(x: pane.minX, y: pane.midY), in: size, showsShockwave: false)
-    }
-
     private struct Ripple: Identifiable {
         let id = UUID()
         let started = Date()
         // Fractions of the available space keep the origin in place during resizing.
         let origin: CGPoint
         let scale: Float
-        let showsShockwave: Bool
+        let aspect = Float.random(in: 0.975...1.025)
         let duration = Double.random(in: 2.2...2.6)
     }
 
-    private func addRipple(at location: CGPoint, in size: CGSize, showsShockwave: Bool = true) {
+    private func addRipple(at location: CGPoint, in size: CGSize) {
         guard !motionDisabled, scenePhase == .active, size.width > 0, size.height > 0 else { return }
-        // Stay generously sized, with only occasional, subtle variation.
+        // Slight variation on every tap, with occasional wider waves.
         let scale: Float = Double.random(in: 0..<1) < 0.3
-            ? Float.random(in: 1.35...1.55) : 1.45
+            ? Float.random(in: 1.35...1.55) : Float.random(in: 1.42...1.48)
         let ripple = Ripple(
             origin: CGPoint(x: location.x / size.width, y: location.y / size.height),
-            scale: scale, showsShockwave: showsShockwave
+            scale: scale
         )
         ripples.append(ripple)
         // Each tap expires independently; a later tap never restarts an earlier one.
@@ -189,14 +269,19 @@ struct ContentView: View {
     private func rippleValues(at date: Date) -> [Float] {
         ripples.flatMap { ripple in
             [Float(ripple.origin.x), Float(ripple.origin.y),
-             Float(date.timeIntervalSince(ripple.started) / ripple.duration), ripple.scale]
+             Float(date.timeIntervalSince(ripple.started) / ripple.duration), ripple.scale, ripple.aspect]
         }
     }
 
-    private var wordmark: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 0) {
-            ForEach(Array("Lima".enumerated()), id: \.offset) { index, letter in
+    private func wordmark(hingeAmount: Double) -> some View {
+        let letters = Array("Lima")
+        let midpoint = Double(letters.count - 1) / 2
+        return HStack(alignment: .firstTextBaseline, spacing: 0) {
+            ForEach(Array(letters.enumerated()), id: \.offset) { index, letter in
                 Text(String(letter))
+                    .textRenderer(HingeLetterRenderer(amount: hingeAmount,
+                                                      maximumDisplacement: rippleWidth * 0.22, seed: index,
+                                                      outwardPosition: midpoint == 0 ? 0 : (Double(index) - midpoint) / midpoint))
                     .offset(
                         x: settled || motionDisabled ? 0 : (Double(index) - 1.5) * 2,
                         y: settled || motionDisabled ? 0 : (index.isMultiple(of: 2) ? -5 : 5)
@@ -206,6 +291,7 @@ struct ContentView: View {
                 .fill(.indigo)
                 .frame(width: dotSize, height: dotSize)
                 .padding(.leading, 3)
+                .offset(x: rippleWidth * 0.22 * abs(hingeAmount))
         }
         .environment(\.layoutDirection, .leftToRight)
         .font(.largeTitle.bold())

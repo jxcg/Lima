@@ -2,16 +2,10 @@ import CoreGraphics
 
 // Finds room for a single content group without crossing a fold or camera region.
 enum AvailableRegion {
-    struct WelcomePlacement {
-        let frame: CGRect
-        let usesRightHandPane: Bool
-    }
-
     static func welcome(in bounds: CGRect, excluding reserved: [CGRect],
                         divisions: [CGRect], preferRightHandPane: Bool,
-                        minimumPaneWidth: CGFloat) -> WelcomePlacement {
-        let fallback = WelcomePlacement(frame: largest(in: bounds, excluding: reserved),
-                                        usesRightHandPane: false)
+                        minimumPaneWidth: CGFloat) -> CGRect {
+        let fallback = largest(in: bounds, excluding: reserved)
         guard preferRightHandPane else { return fallback }
 
         // The inactive fold remains a useful boundary when the display is flat.
@@ -23,7 +17,7 @@ enum AvailableRegion {
                                width: bounds.maxX - rightEdgeOfFold, height: bounds.height)
         let right = largest(in: rightHalf, excluding: reserved)
         guard !right.isEmpty, right.width >= minimumPaneWidth else { return fallback }
-        return WelcomePlacement(frame: right, usesRightHandPane: true)
+        return right
     }
 
     static func largest(in bounds: CGRect, excluding reserved: [CGRect]) -> CGRect {
