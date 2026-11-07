@@ -54,6 +54,7 @@ The developer is new to Swift and SwiftUI and is learning by building Lima. Pitc
 
 - Never commit or push to `main`. Work on a branch named `ft/ref-<issue number>`, such as `ft/ref-6`. If there's no issue, ask before you create the branch.
 - Push the branch and open a pull request. Wait for approval. Never merge before it's approved.
+- **PR description hard rule:** Use 3–5 concise bullet points, followed only by the issue reference, such as `Refs #3`. Do not add headings, introductory prose, previews, commands, validation sections or pending checks unless the developer explicitly requests extra content.
 
 ## Platform facts
 
