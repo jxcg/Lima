@@ -29,3 +29,5 @@ With a free Apple account, the app stops working after 7 days. Run it from Xcode
 ## Working on Lima
 
 [AGENTS.md](AGENTS.md) is the project brief for people and AI agents: the words we use, the architecture, the clean-up rules and the phases.
+
+[Welcome interaction previews](Docs/Previews/README.md) contains GIFs of the Duo handoff and subtle ripple variation, plus verification results and pending device checks.
