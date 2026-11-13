@@ -37,7 +37,7 @@ struct HingeLetterMotionCheck {
         precondition(!motion.update(angle: 1.001, at: 0.1), "A repeated pose must not prolong motion")
         let before = motion.amount
         precondition(!motion.update(angle: 2, at: 0.08) && motion.amount == before, "Ignore out-of-order samples")
-        motion.settle()
+        motion.reset()
         precondition(motion.amount == 0, "Stopping must restore the exact normal placement")
         precondition(!motion.update(angle: 0.5, at: 100) && motion.amount == 0,
                      "A long stationary pause must not make the next fast snap look slow")
@@ -74,7 +74,7 @@ struct HingeLetterMotionCheck {
                                  "Speed changes must blend without an abrupt jump or collapse")
                 }
             }
-            changing.settle()
+            changing.reset()
             precondition(changing.amount == 0, "Blending must not delay the final snap back")
         }
         print(String(format: "Same 60° fold: 5°/s = %.4f, 45°/s = %.4f, 600°/s = %.6f displacement", gentle, moderate, snap))
@@ -96,7 +96,7 @@ struct HingeLetterMotionCheck {
         }
         precondition(returning.displayedAmount(at: 20 + HingeLetterMotion.returnDuration) == 0,
                      "The return must finish exactly at the native placement")
-        returning.settle()
+        returning.reset()
         precondition(!returning.isReturning && returning.amount == 0, "Stop rendering when the return is done")
 
         var interrupted = fold(speed: 5)
@@ -147,7 +147,7 @@ struct HingeLetterMotionCheck {
         precondition(midReturn.displayedAmount(at: 21.08) == 0, "Repeated resize events cannot extend the original handoff deadline")
         for destination in [90.0, 140.0] {
             var resumed = fold(speed: 5)
-            resumed.settle()
+            resumed.reset()
             let start = 120.0 * Double.pi / 180
             precondition(!resumed.update(angle: start, at: 30) && resumed.amount == 0)
             for step in 1...120 {
@@ -183,7 +183,7 @@ struct HingeLetterMotionCheck {
         noGeometrySignal.holdForDisplayChange(at: 20)
         let fallback = 20 + noGeometrySignal.handoffFallbackDelay(at: 20)
         precondition(noGeometrySignal.displayedAmount(at: fallback - 0.001) == noGeometrySignal.amount)
-        noGeometrySignal.settle() // The pending timeout only expires; it cannot start a hidden return.
+        noGeometrySignal.reset() // The pending timeout only expires; it cannot start a hidden return.
         precondition(noGeometrySignal.displayedAmount(at: 21) == 0,
                      "Missing destination callbacks must discard stale state without an animation loop")
         var lateGeometry = fold(speed: 5)
