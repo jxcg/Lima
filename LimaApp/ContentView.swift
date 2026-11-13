@@ -109,7 +109,8 @@ struct ContentView: View {
             if hinge.status == .closed {
                 if !hingeMotion.isHandingOff {
                     holdHingeHandoff(resume: false)
-                    scheduleHingeHandoffFallback()
+                    // With no destination signal, discard stale state; never animate unseen during the switch.
+                    settleHinge(after: hingeMotion.handoffFallbackDelay(at: ProcessInfo.processInfo.systemUptime))
                 }
                 return
             }
@@ -134,6 +135,9 @@ struct ContentView: View {
                         settled = true
                     }
                 }
+            } else {
+                holdHingeHandoff(resume: false)
+                if scenePhase == .background { ripples.removeAll() }
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .NSProcessInfoPowerStateDidChange)
@@ -145,10 +149,6 @@ struct ContentView: View {
                 ripples.removeAll()
                 stopHingeMotion()
             }
-        }
-        .onChange(of: scenePhase) {
-            if scenePhase != .active { holdHingeHandoff(resume: false) }
-            if scenePhase == .background { ripples.removeAll() }
         }
         .onChange(of: horizontalSizeClass) { holdHingeHandoff() }
         .onAppear { resumeHingeHandoff() }
@@ -177,7 +177,7 @@ struct ContentView: View {
         guard !hingeMotion.isReturning, !hingeMotion.isHandingOff else { return }
         hingeSettleTask?.cancel()
         hingeMotion.beginReturn(at: ProcessInfo.processInfo.systemUptime)
-        scheduleHingeReturnCompletion()
+        settleHingeAfterReturn()
     }
 
     private func holdHingeHandoff(resume: Bool = true) {
@@ -192,31 +192,21 @@ struct ContentView: View {
         guard !motionDisabled, scenePhase == .active, hingeMotion.isHandingOff else { return }
         hingeSettleTask?.cancel()
         hingeMotion.resumeAfterDisplayChange(at: ProcessInfo.processInfo.systemUptime)
-        scheduleHingeReturnCompletion()
+        settleHingeAfterReturn()
     }
 
-    private func scheduleHingeHandoffFallback() {
-        guard scenePhase == .active, hingeMotion.isHandingOff else { return }
-        let delay = hingeMotion.handoffFallbackDelay(at: ProcessInfo.processInfo.systemUptime)
-        // With no destination signal, discard stale state; never animate unseen during the switch.
+    private func settleHingeAfterReturn() {
+        guard hingeMotion.isReturning else { hingeSettleTask = nil; return }
+        // The existing timeline draws the short return, then pauses again when idle.
+        settleHinge(after: hingeMotion.returnRemaining(at: ProcessInfo.processInfo.systemUptime))
+    }
+
+    private func settleHinge(after delay: TimeInterval) {
         hingeSettleTask = Task {
             do { try await Task.sleep(for: .seconds(delay)) }
             catch { return }
             guard !Task.isCancelled else { return }
-            hingeMotion.settle()
-            hingeSettleTask = nil
-        }
-    }
-
-    private func scheduleHingeReturnCompletion() {
-        guard hingeMotion.isReturning else { hingeSettleTask = nil; return }
-        let remaining = hingeMotion.returnRemaining(at: ProcessInfo.processInfo.systemUptime)
-        // The existing timeline draws the short return, then pauses again when idle.
-        hingeSettleTask = Task {
-            do { try await Task.sleep(for: .seconds(remaining)) }
-            catch { return }
-            guard !Task.isCancelled else { return }
-            hingeMotion.settle()
+            hingeMotion.reset()
             hingeSettleTask = nil
         }
     }
@@ -283,7 +273,7 @@ struct ContentView: View {
                                                       maximumDisplacement: rippleWidth * 0.22, seed: index,
                                                       outwardPosition: midpoint == 0 ? 0 : (Double(index) - midpoint) / midpoint))
                     .offset(
-                        x: settled || motionDisabled ? 0 : (Double(index) - 1.5) * 2,
+                        x: settled || motionDisabled ? 0 : (Double(index) - midpoint) * 2,
                         y: settled || motionDisabled ? 0 : (index.isMultiple(of: 2) ? -5 : 5)
                     )
             }
