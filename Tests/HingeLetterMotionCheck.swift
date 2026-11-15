@@ -201,5 +201,40 @@ struct HingeLetterMotionCheck {
                      "A fresh hinge sample before activation must not revive an expired handoff")
         precondition(inputBeforeActivation.update(angle: 2.001, at: 21.22) && abs(inputBeforeActivation.amount) < 0.01)
         print("PASS: closed-before-geometry, geometry-before-closed and missing-geometry callback orders")
+
+        // A slow close recorded on the Duo Simulator. The outer display takes over at about 69°,
+        // and the hinge keeps reporting `closed` angles while the hand finishes closing it.
+        let partlyOpen: [(TimeInterval, Double)] = [
+            (8.055, 1.3341), (8.088, 1.3167), (8.122, 1.3002), (8.171, 1.2786),
+            (8.221, 1.2618), (8.255, 1.2435), (8.288, 1.2261),
+        ]
+        let closedSamples: [(TimeInterval, Double)] = [
+            (8.350, 1.2020), (8.503, 1.1203), (8.572, 1.0954), (8.604, 1.0719), (8.653, 1.0537),
+            (8.703, 1.0332), (8.737, 1.0129), (8.770, 0.9931), (8.803, 0.9796), (8.836, 0.9658),
+            (8.886, 0.9386), (8.920, 0.9196), (8.953, 0.9017), (8.986, 0.8793), (9.020, 0.8631),
+            (9.072, 0.8393), (9.105, 0.8209), (9.140, 0.8025), (9.189, 0.7878),
+        ]
+        let outerLayout = 8.415
+        var slowClose = HingeLetterMotion()
+        for (time, angle) in partlyOpen { _ = slowClose.update(angle: angle, at: time) }
+        var switched = false
+        var atSwitch = 0.0
+        for (index, (time, angle)) in closedSamples.enumerated() {
+            if !switched && time > outerLayout {
+                // The view holds, then resumes, when the outer display's size class arrives.
+                slowClose.holdForDisplayChange(at: outerLayout)
+                slowClose.resumeAfterDisplayChange(at: outerLayout)
+                switched = true
+            }
+            // The view keeps feeding `closed` samples while the hinge is still moving.
+            _ = slowClose.update(angle: angle, at: time)
+            if index == 0 { atSwitch = abs(slowClose.displayedAmount(at: time)) }
+            let next = index + 1 < closedSamples.count ? closedSamples[index + 1].0 : time
+            for check in stride(from: time, through: next, by: 0.005) {
+                precondition(abs(slowClose.displayedAmount(at: check)) >= atSwitch * 0.9,
+                             "Letters must stay stretched on the outer display while the hinge keeps closing")
+            }
+        }
+        print("PASS: a recorded slow close keeps the stretch on the outer display")
     }
 }
