@@ -106,17 +106,21 @@ struct ContentView: View {
                 returnHingeLetters()
                 return
             }
-            if hinge.status == .closed {
-                if !hingeMotion.isHandingOff {
+            guard hinge.status == .partiallyOpen || hinge.status == .closed else {
+                returnHingeLetters()
+                return
+            }
+            // Duo switches to the outer display at about 70°, while the hand is still closing.
+            // `closed` samples keep their live angle, so the letters follow them on the new display.
+            guard hingeMotion.update(angle: hinge.angle.radians,
+                                     at: ProcessInfo.processInfo.systemUptime) else {
+                if hinge.status == .closed, !hingeMotion.isHandingOff, !hingeMotion.isReturning {
                     holdHingeHandoff(resume: false)
                     // With no destination signal, discard stale state; never animate unseen during the switch.
                     settleHinge(after: hingeMotion.handoffFallbackDelay(at: ProcessInfo.processInfo.systemUptime))
                 }
                 return
             }
-            guard hinge.status == .partiallyOpen else { returnHingeLetters(); return }
-            guard hingeMotion.update(angle: hinge.angle.radians,
-                                     at: ProcessInfo.processInfo.systemUptime) else { return }
             hingeSettleTask?.cancel()
             hingeSettleTask = Task {
                 do { try await Task.sleep(for: HingeLetterMotion.settleDelay) }

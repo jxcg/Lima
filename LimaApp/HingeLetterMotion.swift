@@ -64,7 +64,8 @@ nonisolated struct HingeLetterMotion {
         returnLength = remaining
         returnStarted = nil
         handoffStarted = handoffStarted ?? timestamp
-        clearSamples()
+        // Keep the last sample: a hinge still closing after the switch continues without a dip.
+        // The quiet-interval check in `update` still ignores samples from before a pause.
     }
 
     mutating func resumeAfterDisplayChange(at timestamp: TimeInterval) {
