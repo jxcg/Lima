@@ -51,6 +51,7 @@ let linked = MTLLinkedFunctions()
 linked.functions = [library.makeFunction(name: "limaRipple")!]
 descriptor.linkedFunctions = linked
 let pipeline = try device.makeComputePipelineState(descriptor: descriptor, options: [], reflection: nil)
+let queue = device.makeCommandQueue()!
 let texture = device.makeTexture(descriptor: .texture2DDescriptor(pixelFormat: .rgba8Unorm, width: 160, height: 80, mipmapped: false))!
 var pixels = [UInt8]()
 for y in 0..<80 {
@@ -76,83 +77,82 @@ let narrowScenarios: [[Float]] = [
     [0.8, 0.5, 0.2, 1.45,   0, 0, 0, 1],
     [0, 0, 0, 1,          0, 0, 0, 1]
 ]
-// Move the same text and taps into the centre of a wider window without changing
-// their size in points. Resizing must not change the wave crossing the letters.
-let wideScenarios = narrowScenarios.map { record in
-    var translated = record
-    for index in [0, 4] {
-        translated[index] = (record[index] * 160 + 240) / 640
-        translated[index + 1] = (record[index + 1] * 80 + 200) / 480
+let restingScenarios = [0, 3, 11]
+// Move the same text and taps into a wider window, centred or in the right-hand pane,
+// without changing their size in points. Resizing must not change the wave crossing the letters.
+func translated(left: Float) -> [[Float]] {
+    narrowScenarios.map { record in
+        var moved = record
+        for index in [0, 4] {
+            moved[index] = (record[index] * 160 + left) / 640
+            moved[index + 1] = (record[index + 1] * 80 + 200) / 480
+        }
+        return moved
     }
-    return translated
 }
-let rightScenarios = narrowScenarios.map { record in
-    var translated = record
-    for index in [0, 4] {
-        translated[index] = (record[index] * 160 + 400) / 640
-        translated[index + 1] = (record[index + 1] * 80 + 200) / 480
+let wideScenarios = translated(left: 240)
+// Narrow, wide, wide and cropped, then the right-hand pane: one block of 12 each.
+let scenarios = narrowScenarios + wideScenarios + wideScenarios + translated(left: 400)
+let count = scenarios.count * 12800
+
+// Each tap record gains an aspect field; 1 keeps the original circular wave.
+func render(aspects: (Int) -> (Float, Float) = { _ in (1, 1) }) -> [SIMD4<Float>] {
+    let records = scenarios.indices.flatMap { scenario in
+        let (first, second) = aspects(scenario)
+        return Array(scenarios[scenario][0..<4]) + [first] + Array(scenarios[scenario][4..<8]) + [second]
     }
-    return translated
+    let input = records.withUnsafeBytes { device.makeBuffer(bytes: $0.baseAddress!, length: $0.count)! }
+    let buffer = device.makeBuffer(length: count * MemoryLayout<SIMD4<Float>>.stride)!
+    let command = queue.makeCommandBuffer()!
+    let encoder = command.makeComputeCommandEncoder()!
+    encoder.setComputePipelineState(pipeline)
+    encoder.setBuffer(buffer, offset: 0, index: 0)
+    encoder.setBuffer(input, offset: 0, index: 1)
+    encoder.setTexture(texture, index: 0)
+    encoder.dispatchThreads(MTLSize(width: count, height: 1, depth: 1), threadsPerThreadgroup: MTLSize(width: 64, height: 1, depth: 1))
+    encoder.endEncoding()
+    command.commit()
+    command.waitUntilCompleted()
+    precondition(command.status == .completed)
+    return Array(UnsafeBufferPointer(start: buffer.contents().bindMemory(to: SIMD4<Float>.self, capacity: count), count: count))
 }
-let scenarios = narrowScenarios + wideScenarios + wideScenarios + rightScenarios
-// Keep the original circular cases, adding the new aspect field to each tap record.
-let records: [Float] = scenarios.flatMap { scenario in
-    [0, 4].flatMap { Array(scenario[$0..<($0 + 4)]) + [1] }
-}
-let recordBuffer = records.withUnsafeBytes { device.makeBuffer(bytes: $0.baseAddress!, length: $0.count)! }
-let count = scenarios.count * 160 * 80
-let buffer = device.makeBuffer(length: count * MemoryLayout<SIMD4<Float>>.stride)!
-let command = device.makeCommandQueue()!.makeCommandBuffer()!
-let encoder = command.makeComputeCommandEncoder()!
-encoder.setComputePipelineState(pipeline)
-encoder.setBuffer(buffer, offset: 0, index: 0)
-encoder.setBuffer(recordBuffer, offset: 0, index: 1)
-encoder.setTexture(texture, index: 0)
-encoder.dispatchThreads(MTLSize(width: count, height: 1, depth: 1), threadsPerThreadgroup: MTLSize(width: 64, height: 1, depth: 1))
-encoder.endEncoding()
-command.commit()
-command.waitUntilCompleted()
-precondition(command.status == .completed)
-let output = buffer.contents().bindMemory(to: SIMD4<Float>.self, capacity: count)
-var changed = 0
-var colourEdges = Array(repeating: [0, 0], count: scenarios.count)
-for i in 0..<count {
-    let pixel = output[i]
-    let original = Float(pixels[(i % 12800) * 4]) / 255
-    let originalAlpha = Float(pixels[(i % 12800) * 4 + 3]) / 255
-    let x = i % 160
-    let background: Float = x < 80 ? 1 : 0
-    let displayed = SIMD3(pixel.x, pixel.y, pixel.z) + background * (1 - pixel.w)
-    for channel in 0..<4 {
-        precondition(pixel[channel].isFinite && (0...1).contains(pixel[channel]), "Invalid colour output")
-    }
-    for channel in 0..<3 {
-        precondition(pixel[channel] <= pixel.w + 0.001, "Output must stay premultiplied")
-    }
-    if [0, 3, 11].contains((i / 12800) % 12) {
-        precondition(abs(pixel.x - original) < 0.001 && abs(pixel.y - original) < 0.001 && abs(pixel.z - original) < 0.001 && abs(pixel.w - originalAlpha) < 0.001, "Resting pixels must be unchanged")
-    } else {
-        if abs(displayed.y - (original + background * (1 - originalAlpha))) > 0.1 { changed += 1 }
-        if (24..<70).contains(x) || (90..<134).contains(x) {
-            if max(displayed.x, displayed.y, displayed.z) - min(displayed.x, displayed.y, displayed.z) > 0.02 {
-                colourEdges[i / 12800][x < 80 ? 0 : 1] += 1
-            }
+
+// Every output must be a valid premultiplied colour, and resting scenarios must equal the input.
+func checkColours(_ output: [SIMD4<Float>]) {
+    for (i, pixel) in output.enumerated() {
+        precondition((0..<4).allSatisfy { pixel[$0].isFinite && (0...1).contains(pixel[$0]) }, "Invalid colour output")
+        precondition((0..<3).allSatisfy { pixel[$0] <= pixel.w + 0.001 }, "Output must stay premultiplied")
+        if restingScenarios.contains((i / 12800) % 12) {
+            let original = pixels[(i % 12800) * 4..<(i % 12800) * 4 + 4].map { Float($0) / 255 }
+            precondition((0..<4).allSatisfy { abs(pixel[$0] - original[$0]) < 0.001 }, "Resting pixels must be unchanged")
         }
     }
 }
-precondition(changed > 100, "Wave must still bend the strokes")
-print("Changed stroke samples: \(changed); coloured edges in light/dark (default size): \(colourEdges[1])")
-guard [1, 5, 6].allSatisfy({ colourEdges[$0].allSatisfy { $0 > 20 } }) else {
-    print("FAIL: the moving wave must disperse light in both appearances")
-    exit(1)
+
+let output = render()
+checkColours(output)
+var changed = 0
+var colourEdges = Array(repeating: [0, 0], count: scenarios.count)
+for (i, pixel) in output.enumerated() where !restingScenarios.contains((i / 12800) % 12) {
+    let x = i % 160
+    let original = Float(pixels[(i % 12800) * 4]) / 255
+    let originalAlpha = Float(pixels[(i % 12800) * 4 + 3]) / 255
+    let background: Float = x < 80 ? 1 : 0
+    let displayed = SIMD3(pixel.x, pixel.y, pixel.z) + background * (1 - pixel.w)
+    if abs(displayed.y - (original + background * (1 - originalAlpha))) > 0.1 { changed += 1 }
+    if ((24..<70).contains(x) || (90..<134).contains(x))
+        && displayed.max() - displayed.min() > 0.02 {
+        colourEdges[i / 12800][x < 80 ? 0 : 1] += 1
+    }
 }
-print("PASS: temporary dispersion in both appearances; exact static endpoints")
+precondition(changed > 100, "Wave must still bend the strokes")
+precondition([1, 5, 6].allSatisfy { colourEdges[$0].allSatisfy { $0 > 20 } },
+             "The moving wave must disperse light in both appearances")
+print("PASS: wave bends \(changed) stroke samples, disperses light in both appearances, exact static endpoints")
 
 func differences(_ first: Int, _ second: Int) -> Int {
     (0..<12800).filter { pixel in
-        let a = output[first * 12800 + pixel]
-        let b = output[second * 12800 + pixel]
-        return (0..<4).contains { abs(a[$0] - b[$0]) > 0.001 }
+        (0..<4).contains { abs(output[first * 12800 + pixel][$0] - output[second * 12800 + pixel][$0]) > 0.001 }
     }.count
 }
 precondition(differences(1, 4) > 100, "Moving the tap must move the ripple")
@@ -161,77 +161,29 @@ precondition(differences(7, 1) > 100 && differences(7, 10) > 100, "Both overlapp
 precondition(differences(8, 1) == 0, "A new tap must not cancel or change the earlier wave")
 precondition(differences(9, 10) == 0, "An expired wave must not affect the remaining wave")
 print("PASS: tap origins, size variation, overlapping waves and independent endpoints")
-var largestLayoutDifference: Float = 0
-for scenario in narrowScenarios.indices {
-    var peak: Float = 0
-    var total: Float = 0
-    for pixel in 0..<12800 {
-        let narrow = output[scenario * 12800 + pixel]
-        let wide = output[(scenario + narrowScenarios.count) * 12800 + pixel]
-        for channel in 0..<4 {
-            let error = abs(narrow[channel] - wide[channel])
-            peak = max(peak, error)
-            total += error
-        }
-    }
-    let mean = total / (12800 * 4)
-    // Translating the texture can round a few channels by one 8-bit shade.
-    guard peak <= 0.005, mean < 0.00001 else {
-        print("FAIL: layout changed refraction in scenario \(scenario); peak error \(peak), mean error \(mean)")
-        exit(1)
-    }
-    largestLayoutDifference = max(largestLayoutDifference, peak)
-}
-print("PASS: matching refraction across narrow and wide layouts; peak channel rounding \(largestLayoutDifference)")
-for scenario in narrowScenarios.indices {
-    precondition(differences(scenario, scenario + 2 * narrowScenarios.count) == 0,
-                 "Cropping must preserve the original refraction and tap coordinates")
-}
-print("PASS: cropped rendering preserves all sampled pixels, including overlapping waves")
-for scenario in narrowScenarios.indices {
-    var peak: Float = 0, total: Float = 0
-    for pixel in 0..<12800 {
-        let expected = output[scenario * 12800 + pixel]
-        let right = output[(scenario + 3 * narrowScenarios.count) * 12800 + pixel]
-        for channel in 0..<4 {
-            let error = abs(expected[channel] - right[channel])
-            peak = max(peak, error)
-            total += error
-        }
-    }
-    precondition(peak <= 0.005 && total / 51200 < 0.00001,
-                 "Moving content to the right-hand pane must preserve refraction and tap mapping")
-}
-print("PASS: right-hand pane refraction and tap coordinates match the centred layout")
 
-var variedRecords = records
-for scenario in scenarios.indices {
-    variedRecords[scenario * 10 + 4] = scenario.isMultiple(of: 2) ? 0.975 : 1.025
-    variedRecords[scenario * 10 + 9] = scenario.isMultiple(of: 2) ? 1.025 : 0.975
+// Moving or cropping the layer may round a few channels by one 8-bit shade (1/255), never more.
+func matchesNarrow(block: Int) -> Bool {
+    narrowScenarios.indices.allSatisfy { scenario in
+        var peak: Float = 0, total: Float = 0
+        for pixel in 0..<12800 {
+            for channel in 0..<4 {
+                let error = abs(output[scenario * 12800 + pixel][channel]
+                                - output[(scenario + block * 12) * 12800 + pixel][channel])
+                peak = max(peak, error)
+                total += error
+            }
+        }
+        return peak <= 0.005 && total / 51200 < 0.00001
+    }
 }
-let variedInput = variedRecords.withUnsafeBytes { device.makeBuffer(bytes: $0.baseAddress!, length: $0.count)! }
-let variedBuffer = device.makeBuffer(length: count * MemoryLayout<SIMD4<Float>>.stride)!
-let variedCommand = device.makeCommandQueue()!.makeCommandBuffer()!
-let variedEncoder = variedCommand.makeComputeCommandEncoder()!
-variedEncoder.setComputePipelineState(pipeline)
-variedEncoder.setBuffer(variedBuffer, offset: 0, index: 0)
-variedEncoder.setBuffer(variedInput, offset: 0, index: 1)
-variedEncoder.setTexture(texture, index: 0)
-variedEncoder.dispatchThreads(MTLSize(width: count, height: 1, depth: 1), threadsPerThreadgroup: MTLSize(width: 64, height: 1, depth: 1))
-variedEncoder.endEncoding()
-variedCommand.commit()
-variedCommand.waitUntilCompleted()
-precondition(variedCommand.status == .completed)
-let variedOutput = variedBuffer.contents().bindMemory(to: SIMD4<Float>.self, capacity: count)
-var variedPixels = 0
-for i in 0..<count {
-    let pixel = variedOutput[i]
-    precondition((0..<4).allSatisfy { pixel[$0].isFinite && (0...1).contains(pixel[$0]) })
-    precondition((0..<3).allSatisfy { pixel[$0] <= pixel.w + 0.001 })
-    let changed = (0..<4).contains { abs(pixel[$0] - output[i][$0]) > 0.001 }
-    if [0, 3, 11].contains((i / 12800) % 12) {
-        precondition(!changed, "Aspect variation must preserve exact static endpoints")
-    } else if changed { variedPixels += 1 }
-}
+precondition(matchesNarrow(block: 1), "A wider window must not change the refraction")
+precondition(matchesNarrow(block: 2), "Cropping must preserve the refraction and tap coordinates")
+precondition(matchesNarrow(block: 3), "The right-hand pane must preserve the refraction and tap coordinates")
+print("PASS: wide, cropped and right-hand layouts match the narrow refraction")
+
+let varied = render { $0.isMultiple(of: 2) ? (0.975, 1.025) : (1.025, 0.975) }
+checkColours(varied)
+let variedPixels = zip(output, varied).filter { a, b in (0..<4).contains { abs(a[$0] - b[$0]) > 0.001 } }.count
 precondition(variedPixels > 100, "Small aspect variation must change the refraction footprint")
 print("PASS: subtle aspect variation changes \(variedPixels) samples without altering resting pixels or colour validity")
