@@ -26,7 +26,5 @@ struct RippleShockwave: View {
             ))
             .frame(width: radius * 2, height: radius * 2)
             .opacity(attack * fade * fade)
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
     }
 }

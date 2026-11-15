@@ -137,10 +137,6 @@ nonisolated struct HingeLetterMotion {
         return true
     }
 
-    mutating func settle() {
-        reset()
-    }
-
     mutating func reset() { self = Self() }
 }
 
