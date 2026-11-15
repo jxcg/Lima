@@ -18,14 +18,13 @@ Each tap keeps its exact origin and independent lifetime. A random aspect ratio 
 
 ## Verification
 
-The motion, layout and real-shader checks pass:
+The motion and layout checks pass:
 
 ```sh
 swiftc LimaApp/HingeLetterMotion.swift Tests/HingeLetterMotionCheck.swift -o /tmp/lima-hinge-check
 /tmp/lima-hinge-check
 swiftc LimaApp/AvailableRegion.swift Tests/AvailableRegionCheck.swift -o /tmp/lima-region-check
 /tmp/lima-region-check
-swift Tests/RippleCheck.swift
 ```
 
 The review found an early-return bug during delayed display switches. The fix waits for destination layout/activation instead of animating while unseen. Checks cover both callback orders, delays up to 1.2 seconds, timeout expiry and interrupted returns. Ponytail review removed the unused welcome-placement wrapper and flag.
