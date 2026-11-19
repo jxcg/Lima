@@ -16,6 +16,11 @@
 			path = LimaApp;
 			sourceTree = "<group>";
 		};
+		A10000000000000000000010 /* Shared */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Shared;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -33,6 +38,7 @@
 			isa = PBXGroup;
 			children = (
 				A10000000000000000000002 /* LimaApp */,
+				A10000000000000000000010 /* Shared */,
 				A10000000000000000000005 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -62,6 +68,7 @@
 			);
 			fileSystemSynchronizedGroups = (
 				A10000000000000000000002 /* LimaApp */,
+				A10000000000000000000010 /* Shared */,
 			);
 			name = Lima;
 			productName = Lima;

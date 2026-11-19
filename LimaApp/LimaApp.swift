@@ -1,12 +1,16 @@
 import SwiftUI
 
 // The app's starting point. `@main` tells iOS to run this when Lima opens.
-// `WindowGroup` is the app's window, and `ContentView` is the first screen in it.
+// `WindowGroup` owns the window. Both tabs stay alive while the window resizes.
 @main
 struct LimaApp: App {
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            TabView {
+                Tab("Test bench", systemImage: "text.badge.checkmark") { TestBenchView() }
+                Tab("Welcome", systemImage: "hand.wave") { ContentView() }
+            }
+            .tint(.indigo)
         }
     }
 }
