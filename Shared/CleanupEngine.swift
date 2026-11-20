@@ -83,6 +83,7 @@ struct GroqKeyStore {
 
 @MainActor
 protocol CleanupEngine {
+    var modelTitle: String { get }
     func clean(_ raw: String, settings: LimaSettings) async throws -> String
 }
 
@@ -95,6 +96,9 @@ enum CleanupError: LocalizedError, Equatable {
 
 @MainActor
 struct AppleOnDeviceEngine: CleanupEngine {
+    private let model = SystemLanguageModel.default
+    var modelTitle: String { "Apple · \(model.variant.displayName)" }
+
     static func unavailableReason(_ availability: SystemLanguageModel.Availability) -> String? {
         switch availability {
         case .available: nil
@@ -110,7 +114,7 @@ struct AppleOnDeviceEngine: CleanupEngine {
         guard !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw CleanupError.failed("Type or dictate a message first.")
         }
-        if let reason = Self.unavailableReason(SystemLanguageModel.default.availability) {
+        if let reason = Self.unavailableReason(model.availability) {
             throw CleanupError.failed(reason)
         }
         var entries: [Transcript.Entry] = [
@@ -123,7 +127,7 @@ struct AppleOnDeviceEngine: CleanupEngine {
             entries.append(.prompt(Transcript.Prompt(segments: [.text(.init(content: CleanupRules.prompt(input)))])))
             entries.append(.response(Transcript.Response(assetIDs: [], segments: [.text(.init(content: output))])))
         }
-        let session = LanguageModelSession(transcript: Transcript(entries: entries))
+        let session = LanguageModelSession(model: model, transcript: Transcript(entries: entries))
         do {
             let response = try await session.respond(
                 to: CleanupRules.prompt(CleanupGuards.prepare(raw)), generating: CleanMessage.self,
@@ -160,6 +164,7 @@ struct GroqEngine: CleanupEngine {
 
     var keyStore: GroqKeyStore = .keychain
     var model: GroqModel = .qwen3_8
+    var modelTitle: String { "Groq · \(model.title)" }
     var endpoint = URL(string: ProcessInfo.processInfo.environment["LIMA_GROQ_URL"]
         ?? "https://api.groq.com/openai/v1/chat/completions")!
     var transport: Transport = { request in
