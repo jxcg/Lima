@@ -111,7 +111,7 @@ final class TestBenchModel {
 
         switch mode {
         case .apple:
-            await runSingle(engine: appleEngine, source: "Apple, on this device", original: original)
+            await runSingle(engine: appleEngine, original: original)
         case .groq:
             let groq = groqBuilder(groqModel)
             let start = ContinuousClock.now
@@ -121,7 +121,7 @@ final class TestBenchModel {
                 try Task.checkCancellation()
                 guard rawText == original else { return }
                 cleanText = output
-                cleanSource = "Groq · \(groqModel.title)"
+                cleanSource = groq.modelTitle
                 elapsed = Self.seconds(since: start)
             } catch is CancellationError {
                 errorMessage = "Clean-up cancelled. Your raw text is unchanged."
@@ -139,7 +139,7 @@ final class TestBenchModel {
                     try Task.checkCancellation()
                     guard rawText == original else { return }
                     cleanText = output
-                    cleanSource = "Apple fallback (\(groqReason))"
+                    cleanSource = "Apple fallback: \(appleEngine.modelTitle) (\(groqReason))"
                     usedFallback = true
                     elapsed = Self.seconds(since: fallbackStart)
                 } catch is CancellationError {
@@ -149,12 +149,12 @@ final class TestBenchModel {
                 }
             }
         case .compare:
-            let appleOutcome = await measure(engine: appleEngine, title: "Apple, on this device", raw: original)
+            let appleOutcome = await measure(engine: appleEngine, raw: original)
             if Task.isCancelled || rawText != original {
                 if Task.isCancelled { errorMessage = "Clean-up cancelled. Your raw text is unchanged." }
                 return
             }
-            let groqOutcome = await measure(engine: groqBuilder(groqModel), title: "Groq · \(groqModel.title)", raw: original)
+            let groqOutcome = await measure(engine: groqBuilder(groqModel), raw: original)
             if Task.isCancelled || rawText != original {
                 if Task.isCancelled { errorMessage = "Clean-up cancelled. Your raw text is unchanged." }
                 return
@@ -169,13 +169,14 @@ final class TestBenchModel {
         isBusy = true
         results = []
         defer { isBusy = false }
-        let engines: [(String, any CleanupEngine)] = switch mode {
-        case .apple: [("Apple", appleEngine)]
-        case .groq: [("Groq · \(groqModel.title)", groqBuilder(groqModel))]
-        case .compare: [("Apple", appleEngine), ("Groq · \(groqModel.title)", groqBuilder(groqModel))]
+        let engines: [any CleanupEngine] = switch mode {
+        case .apple: [appleEngine]
+        case .groq: [groqBuilder(groqModel)]
+        case .compare: [appleEngine, groqBuilder(groqModel)]
         }
         // Fixed settings make runs comparable; personal word lists and tone are not part of this gate.
-        for (title, activeEngine) in engines {
+        for activeEngine in engines {
+            let title = activeEngine.modelTitle
             for run in 1...3 {
                 for phrase in AcceptancePhrase.all {
                     if Task.isCancelled { return }
@@ -206,7 +207,7 @@ final class TestBenchModel {
         comparison = []
     }
 
-    private func runSingle(engine: any CleanupEngine, source: String, original: String) async {
+    private func runSingle(engine: any CleanupEngine, original: String) async {
         let start = ContinuousClock.now
         do {
             try Task.checkCancellation()
@@ -214,7 +215,7 @@ final class TestBenchModel {
             try Task.checkCancellation()
             guard rawText == original else { return }
             cleanText = output
-            cleanSource = source
+            cleanSource = engine.modelTitle
             elapsed = Self.seconds(since: start)
         } catch is CancellationError {
             errorMessage = "Clean-up cancelled. Your raw text is unchanged."
@@ -224,7 +225,8 @@ final class TestBenchModel {
         }
     }
 
-    private func measure(engine: any CleanupEngine, title: String, raw: String) async -> ComparisonOutcome {
+    private func measure(engine: any CleanupEngine, raw: String) async -> ComparisonOutcome {
+        let title = engine.modelTitle
         let start = ContinuousClock.now
         do {
             try Task.checkCancellation()

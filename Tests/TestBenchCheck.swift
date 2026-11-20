@@ -3,12 +3,14 @@ import Foundation
 // swiftc -swift-version 6 Shared/*.swift LimaApp/TestBenchModel.swift Tests/TestBenchCheck.swift -o /tmp/lima-bench-check
 @MainActor
 private struct FixedEngine: CleanupEngine {
+    let modelTitle = "Test model"
     let output: String
     func clean(_ raw: String, settings: LimaSettings) async throws -> String { output }
 }
 
 @MainActor
 private struct FailingEngine: CleanupEngine {
+    let modelTitle = "Unavailable test model"
     func clean(_ raw: String, settings: LimaSettings) async throws -> String {
         throw CleanupError.failed("The model is busy. Try again.")
     }
@@ -33,6 +35,7 @@ struct TestBenchCheck {
         await bench.clean()
         precondition(bench.rawText == "um I'll be there in like uh 10 minutes")
         precondition(bench.cleanText == "I'll be there in 10 minutes.")
+        precondition(bench.cleanSource == "Test model")
         precondition(bench.elapsed != nil && !bench.isBusy && bench.errorMessage == nil)
         bench.rawText = "A different message"
         precondition(bench.cleanText == nil && bench.elapsed == nil, "Editing must clear stale results")
@@ -58,6 +61,7 @@ struct TestBenchCheck {
         let score = TestBenchModel(engine: FixedEngine(output: "Actually, I really liked the film."))
         await score.runTests()
         precondition(score.results.filter(\.passed).count == 3, "Only the matching phrase should pass, once per run")
+        precondition(score.results.allSatisfy { $0.engineTitle == "Test model" })
         precondition(Set(score.results.map(\.run)) == [1, 2, 3])
         precondition(score.results.filter { $0.phrase.id == 5 }.allSatisfy(\.passed))
 
@@ -99,6 +103,7 @@ struct TestBenchCheck {
         await groqBench.clean()
         precondition(groqBench.cleanText == "Send me the report by Thursday.")
         precondition(groqBench.usedFallback && groqBench.cleanSource?.contains("Apple fallback") == true)
+        precondition(groqBench.cleanSource?.contains("Test model") == true)
 
         // 2. Saving a user key uses Groq directly, strips <think> blocks, and applies post-guards.
         groqBench.saveGroqKey("  gsk_user_supplied_test_key  ")
@@ -122,6 +127,7 @@ struct TestBenchCheck {
         compareBench.rawText = "um I'll be there in like uh 10 minutes"
         await compareBench.clean()
         precondition(compareBench.comparison.count == 2)
+        precondition(compareBench.comparison[0].engineTitle == "Test model")
         precondition(compareBench.comparison[0].output == "I'll be there in 10 minutes." && compareBench.comparison[0].error == nil)
         precondition(compareBench.comparison[1].output == nil && compareBench.comparison[1].error?.contains("rate limit") == true)
         precondition(compareBench.rawText == "um I'll be there in like uh 10 minutes")

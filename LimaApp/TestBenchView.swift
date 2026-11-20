@@ -196,13 +196,11 @@ struct TestBenchView: View {
                         .textSelection(.enabled)
                         .accessibilityIdentifier("clean-text")
                     if let elapsed = bench.elapsed {
-                        let source = bench.cleanSource.map { "\($0) · " } ?? ""
-                        if bench.usedFallback, let fallbackLabel = bench.cleanSource {
-                            Label(fallbackLabel, systemImage: "arrow.uturn.backward.circle")
-                                .font(.caption)
-                                .foregroundStyle(.orange)
+                        if let source = bench.cleanSource {
+                            Label(source, systemImage: bench.usedFallback ? "arrow.uturn.backward.circle" : "cpu")
+                                .font(.subheadline)
                         }
-                        Text("\(source)\(elapsed, format: .number.precision(.fractionLength(2))) seconds")
+                        Text("\(elapsed, format: .number.precision(.fractionLength(2))) seconds")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                     ShareLink("Share clean text", item: cleanText)
